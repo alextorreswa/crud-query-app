@@ -1,98 +1,383 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+
+const queryClient = new QueryClient();
+
+const API_URL = "https://jsonplaceholder.typicode.com/posts";
+
+function PostsScreen() {
+  const queryClient = useQueryClient();
+
+  const [userId, setUserId] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [editId, setEditId] = useState<number | null>(null);
+  const [patchTitle, setPatchTitle] = useState("");
+
+  const fetchPosts = async () => {
+    const url = userId ? `${API_URL}?userId=${userId}` : API_URL;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch posts");
+    }
+
+    return response.json();
+  };
+
+  const {
+    data: posts,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ["posts", userId],
+    queryFn: fetchPosts,
+  });
+
+  const createPost = useMutation({
+    mutationFn: async (newPost: any) => {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        body: JSON.stringify(newPost),
+        headers: {
+          "Content-type": "application/json; charset=UTF-8",
+        },
+      });
+
+      return response.json();
+    },
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+
+      setTitle("");
+      setBody("");
+
+      Alert.alert("Success", "Post created!");
+    },
+  });
+
+  const updatePost = useMutation({
+    mutationFn: async (updatedPost: any) => {
+      const response = await fetch(`${API_URL}/${updatedPost.id}`, {
+        method: "PUT",
+        body: JSON.stringify(updatedPost),
+        headers: {
+          "Content-type": "application/json; charset=UTF-8",
+        },
+      });
+
+      return response.json();
+    },
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+
+      setEditId(null);
+      setTitle("");
+      setBody("");
+
+      Alert.alert("Updated", "Post updated with PUT!");
+    },
+  });
+
+  const patchPost = useMutation({
+    mutationFn: async ({
+      id,
+      title,
+    }: {
+      id: number;
+      title: string;
+    }) => {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+        headers: {
+          "Content-type": "application/json; charset=UTF-8",
+        },
+      });
+
+      return response.json();
+    },
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+
+      setPatchTitle("");
+
+      Alert.alert("Patched", "Title updated!");
+    },
+  });
+
+  const deletePost = useMutation({
+    mutationFn: async (id: number) => {
+      await fetch(`${API_URL}/${id}`, {
+        method: "DELETE",
+      });
+
+      return id;
+    },
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+
+      Alert.alert("Deleted", "Post deleted!");
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!title.trim() || !body.trim()) {
+      Alert.alert("Validation Error", "Title and body are required.");
+      return;
+    }
+
+    if (editId) {
+      updatePost.mutate({
+        id: editId,
+        title,
+        body,
+        userId: 1,
+      });
+    } else {
+      createPost.mutate({
+        title,
+        body,
+        userId: 1,
+      });
+    }
+  };
+
+  const startEdit = (post: any) => {
+    setEditId(post.id);
+    setTitle(post.title);
+    setBody(post.body);
+  };
+
+  const handlePatch = (id: number) => {
+    if (!patchTitle.trim()) {
+      Alert.alert("Validation Error", "Enter a title.");
+      return;
+    }
+
+    patchPost.mutate({
+      id,
+      title: patchTitle,
+    });
+  };
+
+  if (isPending) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text>Loading posts...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (isError) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text>{error.message}</Text>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.heading}>CRUD Query App</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Filter by User ID"
+        value={userId}
+        onChangeText={setUserId}
+        keyboardType="numeric"
+      />
+
+      <View style={styles.card}>
+        <TextInput
+          style={styles.input}
+          placeholder="Post title"
+          value={title}
+          onChangeText={setTitle}
+        />
+
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Post body"
+          value={body}
+          onChangeText={setBody}
+          multiline
+        />
+
+        <TouchableOpacity style={styles.button} onPress={handleSubmit}>
+          <Text style={styles.buttonText}>
+            {editId ? "Update Post" : "Create Post"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.postCard}>
+            <Text style={styles.postTitle}>{item.title}</Text>
+
+            <Text>{item.body}</Text>
+
+            <Text style={styles.userText}>
+              User ID: {item.userId}
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Patch title"
+              value={patchTitle}
+              onChangeText={setPatchTitle}
+            />
+
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={() => startEdit(item)}
+              >
+                <Text style={styles.buttonText}>PUT</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={() => handlePatch(item.id)}
+              >
+                <Text style={styles.buttonText}>PATCH</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.deleteButton}
+                onPress={() => deletePost.mutate(item.id)}
+              >
+                <Text style={styles.buttonText}>DELETE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      />
+    </SafeAreaView>
+  );
+}
 
 export default function HomeScreen() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
-
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <QueryClientProvider client={queryClient}>
+      <PostsScreen />
+    </QueryClientProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    padding: 16,
+    backgroundColor: "#f4f4f4",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  heading: {
+    fontSize: 28,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+
+  card: {
+    backgroundColor: "white",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+
+  postCard: {
+    backgroundColor: "white",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+
+  input: {
+    backgroundColor: "#e5e7eb",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+
+  textArea: {
+    height: 80,
+    textAlignVertical: "top",
+  },
+
+  button: {
+    backgroundColor: "#2563eb",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+
+  smallButton: {
+    backgroundColor: "#2563eb",
+    padding: 8,
+    borderRadius: 8,
+    marginRight: 6,
+  },
+
+  deleteButton: {
+    backgroundColor: "#dc2626",
+    padding: 8,
+    borderRadius: 8,
+  },
+
+  buttonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+
+  postTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 6,
+  },
+
+  userText: {
+    marginTop: 6,
+    marginBottom: 10,
+    fontStyle: "italic",
+  },
+
+  row: {
+    flexDirection: "row",
   },
 });
